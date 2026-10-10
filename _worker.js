@@ -1,18 +1,16 @@
 import { connect } from 'cloudflare:sockets';
 
-// ==========================================
-// 核心配置：请把下面的 UUID 替换为你第一步生成的 UUID
-// ==========================================
+// =================================================================
+// 核心配置：请把下面的 UUID 替换为你自己的专属密钥
+// =================================================================
 const userID = 'de305d54-75b4-431b-adb2-eb6b9e546014'; 
-
-const proxyIPs = ['cdn.cloudflare.net', 'cloudflare.com', '://cloudflare.com'];
 
 export default {
   async fetch(request, env, ctx) {
     try {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader !== 'websocket') {
-        // 如果不是 WebSocket 请求，返回一个虚假的正常网页，伪装成普通网站
+        // 防探测伪装网页
         return new Response(`<html><body style="font-family:sans-serif;text-align:center;padding-top:50px;">
           <h1>Service Operational</h1>
           <p>The server is running successfully.</p>
@@ -35,7 +33,6 @@ async function vlessOverWSHandler(request) {
   let address = '';
   let portWithRandomLog = '';
   const log = (info, event) => { console.log(`[${address}:${portWithRandomLog}] ${info}`, event || ''); };
-  const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
 
   const readableStream = new ReadableStream({
     start(controller) {
@@ -62,7 +59,9 @@ async function vlessOverWSHandler(request) {
       
       const version = new Uint8Array(vlessBuffer.slice(0, 1));
       const id = new Uint8Array(vlessBuffer.slice(1, 17));
-      if (!stringify(id) === userID) {
+      
+      // 【Bug 1 已修复】修正逻辑判断，确保 UUID 正确比对
+      if (stringify(id) !== userID) {
         log('UUID 验证失败，拒绝连接');
         safeCloseWebSocket(server);
         return;
@@ -130,7 +129,8 @@ async function handleTCPConnect(remoteSocketWapper, remoteAddress, port, rawClie
     tcpSocket.readable.pipeTo(new WritableStream({
       async write(chunk) {
         if (webSocket.readyState === WebSocket.OPEN) {
-          webSocket.send(concatBuffer(new Uint8Array([0, 0]), chunk));
+          // 【Bug 2 已修复】移除多余的 [0, 0] 填充，原汁原味回传标准 VLESS 协议流
+          webSocket.send(concatBuffer(new Uint8Array(), chunk));
         }
       },
       close() { log('目标服务器主动断开 TCP'); safeCloseWebSocket(webSocket); },
